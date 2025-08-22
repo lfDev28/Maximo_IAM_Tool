@@ -1,0 +1,111 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: keycloak-db
+    environment:
+      POSTGRES_DB: ${PG_DB:-keycloak}
+      POSTGRES_USER: ${PG_USER:-keycloak}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${PG_USER:-keycloak} -d ${PG_DB:-keycloak}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  keycloak:
+    command: ["start", "--import-realm"]
+    image: quay.io/keycloak/keycloak:26.3.1
+    container_name: keycloak
+    # entrypoint: ["/opt/keycloak/import-ca.sh"]
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change_me}
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-db
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${PG_PASSWORD}
+      KC_HTTPS_PORT: "8443"
+      KC_HTTPS_CERTIFICATE_FILE: "/etc/x509/https/tls.crt"
+      KC_HTTPS_CERTIFICATE_KEY_FILE: "/etc/x509/https/tls.key"
+      KC_HOSTNAME: "localhost"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "false"
+      # --- Truststore SPI config ---
+      KC_SPI_TRUSTSTORE_FILE_FILE: "/opt/keycloak/conf/truststore.jks"
+      KC_SPI_TRUSTSTORE_FILE_PASSWORD: "changeit"
+      KC_SPI_TRUSTSTORE_FILE_HOSTNAME_VERIFICATION_POLICY: "ANY"
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./certs/keycloak/keycloak.pem:/etc/x509/https/tls.crt:ro
+      - ./certs/keycloak/keycloak-key.pem:/etc/x509/https/tls.key:ro
+      - ./Keycloak/realms/maximo-realm.json:/opt/keycloak/data/import/maximo-realm.json:ro
+      - ./certs/keycloak/truststore.jks:/opt/keycloak/conf/truststore.jks:ro
+      - ./Scripts/import-ca.sh:/opt/keycloak/import-ca.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # openldap:
+      #   condition: service_healthy
+    restart: unless-stopped
+
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: openldap
+    command: ["--copy-service"]
+    environment:
+      LDAP_DOMAIN: "example.org" # Base DN will be dc=example,dc=org
+      LDAP_ORGANISATION: "Example Inc"
+      LDAP_ADMIN_PASSWORD: "ApMaximoSupport01!"
+      LDAP_CONFIG_PASSWORD: "ApMaximoSupport01!"
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: "ldap.crt"
+      LDAP_TLS_KEY_FILENAME: "ldap.key"
+      LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
+      LDAP_TLS_ENFORCE: "false" # Allow non-TLS binds for testing
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "false" # Keep config DB for debugging
+      LDAP_TLS_VERIFY_CLIENT: "try"
+    ports:
+      - "1389:389"
+      - "1636:636"
+    volumes:
+      - openldap_data:/var/lib/ldap
+      - openldap_config:/etc/ldap/slapd.d
+      # Mount certs with correct filenames
+      - ./certs/ldap/server.crt:/container/service/slapd/assets/certs/ldap.crt
+      - ./certs/ldap/server.key:/container/service/slapd/assets/certs/ldap.key
+      - ./certs/ldap/ca.crt:/container/service/slapd/assets/certs/ca.crt
+      # Optional: mount LDIFs for seeding
+      - ./OpenLDAP/ldifs:/container/service/slapd/assets/config/bootstrap/ldif/custom
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "ldapsearch",
+          "-H",
+          "ldap://localhost:389",
+          "-x",
+          "-b",
+          "dc=example,dc=org",
+          "-s",
+          "base",
+          "(objectClass=*)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+volumes:
+  keycloak_db_data:
+  keycloak_runtime_data:
+  openldap_data:
+  openldap_config:
