@@ -1,0 +1,12 @@
+{{- if and .Values.ldap.enabled .Values.ldap.seed.enabled (not .Values.ldap.seed.configMapName) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keycloak-mas.fullname" . }}-ldap-seed
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/name: openldap
+data:
+  {{ .Values.ldap.seed.filename }}: |-
+{{ tpl (.Files.Get "files/init.ldif") . | indent 4 }}
+{{- end }}

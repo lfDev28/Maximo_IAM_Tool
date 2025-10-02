@@ -1,0 +1,20 @@
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: mas-iam
+  namespace: mas-iam
+spec:
+  instances: 1
+  db:
+    host: mas-iam-postgres
+    port: 5432
+    database: keycloak
+    usernameSecret:
+      name: mas-iam-db
+      key: username
+    passwordSecret:
+      name: mas-iam-db
+      key: password
+  hostname:
+    hostname: keycloak.mas-iam.local
+    strict: false

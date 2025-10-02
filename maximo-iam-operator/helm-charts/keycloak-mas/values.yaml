@@ -1,0 +1,204 @@
+# ────────────────────────────────────────────────────────────────────────────────
+# Global settings
+# ────────────────────────────────────────────────────────────────────────────────
+global:
+  imagePullSecrets: []
+
+# ────────────────────────────────────────────────────────────────────────────────
+# RHBK (Keycloak) deployment settings
+# ────────────────────────────────────────────────────────────────────────────────
+keycloak:
+  replicaCount: 1
+
+  image:
+    registry: registry.redhat.io
+    repository: rhbk/keycloak-rhel9
+    tag: "26.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+
+  imagePullSecrets: []
+
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+  podAnnotations: {}
+  podLabels: {}
+
+  podSecurityContext: {}
+  securityContext: {}
+
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  admin:
+    username: admin
+    existingSecret: ""
+    passwordSecretKey: admin-password
+    password: ""
+    createSecret: true
+
+  hostname:
+    hostname: ""
+    admin: ""
+    strict: false
+    strictBackchannel: false
+
+  proxy:
+    mode: edge
+    headers: xforwarded
+
+  http:
+    enabled: true
+    port: 8080
+  https:
+    enabled: false
+    port: 8443
+    existingSecret: ""
+
+  metrics:
+    enabled: false
+
+  env: []
+  envFrom: []
+  extraArgs: []
+  javaOpts: []
+  extraVolumeMounts: []
+  extraVolumes: []
+
+  startup:
+    optimized: true
+    import:
+      enabled: false
+      strategy: auto # auto | legacy | modern (auto picks flag based on keycloak.version)
+      behavior: IGNORE_EXISTING # IGNORE_EXISTING | OVERWRITE_EXISTING
+      failOnError: true
+
+  database:
+    vendor: postgres
+    host: ""
+    port: 5432
+    name: keycloak
+    username: keycloak
+    existingSecret: ""
+    passwordSecretKey: password
+
+  truststore:
+    enabled: false
+    secretName: ""
+    fileKey: truststore.jks
+    mountPath: /opt/keycloak/truststore
+    passwordSecretName: ""
+    passwordFromSecretKey: truststore-password
+    hostnameVerificationPolicy: ANY
+
+  ldap:
+    caSecretName: ""
+    caMountPath: /opt/keycloak/ldap-ca
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+  labels: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: keycloak.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+route:
+  enabled: true
+  host: ""
+  tls:
+    termination: edge
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Optional OpenLDAP bootstrap (development convenience)
+# ────────────────────────────────────────────────────────────────────────────────
+ldap:
+  enabled: false
+  image: osixia/openldap:1.5.0
+  baseDN: "dc=mas,dc=local"
+  organisation: "Maximo"
+  domain: "mas.local"
+  admin:
+    existingSecret: ""
+    password: "admin"
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+  securityContext:
+    fsGroup: 1001
+    fsGroupChangePolicy: OnRootMismatch
+  seed:
+    enabled: true
+    configMapName: ""
+    filename: init.ldif
+  tls:
+    enabled: false
+    existingSecret: ""
+
+# ────────────────────────────────────────────────────────────────────────────────
+# PostgreSQL dependency
+# ────────────────────────────────────────────────────────────────────────────────
+postgresql:
+  enabled: true
+  fullnameOverride: ""
+  auth:
+    username: keycloak
+    database: keycloak
+    existingSecret: ""
+  primary:
+    persistence:
+      enabled: true
+      storageClass: ""
+      size: 8Gi
+
+postgresqlAuth:
+  create: true
+  secretName: ""
+  password: ""
+  postgresPassword: ""
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Realm artefacts (populated post dry-run)
+# ────────────────────────────────────────────────────────────────────────────────
+realm:
+  # Path (relative to the chart root) to the realm export JSON committed after the
+  # manual bootstrap/dry-run step. This file is embedded into a ConfigMap when the
+  # realm import toggle is enabled.
+  exportPath: helm/seed/realm-export.json
+  import:
+    enabled: false
+    configMapName: ""
+    filename: realm-export.json
+    mountPath: /opt/keycloak/data/import
+    checksum: ""
+  postImportJob:
+    enabled: false
+    # Override container image. Defaults to the primary Keycloak image when empty.
+    image: ""
+    imagePullPolicy: ""
+    annotations: {}
+    backoffLimit: 3
+    # Optional: reference a secret containing the LDAP bind password.
+    ldapSecretName: ""
+    ldapSecretKey: LDAP_ADMIN_PASSWORD

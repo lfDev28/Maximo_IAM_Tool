@@ -1,0 +1,20 @@
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: KeycloakRealmImport
+metadata:
+  name: mas-iam-realm
+  namespace: ${TEMPLATE_NAMESPACE}
+spec:
+  keycloakCRName: mas-iam
+  realm:
+    id: mas-iam
+    realm: mas-iam
+    displayName: MAS IAM
+    enabled: true
+    clients:
+      - clientId: mas-client
+        name: MAS Demo Client
+        protocol: openid-connect
+        publicClient: true
+        redirectUris:
+          - "https://example.com/*"
+    users: []

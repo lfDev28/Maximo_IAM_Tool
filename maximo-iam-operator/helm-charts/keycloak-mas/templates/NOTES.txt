@@ -1,0 +1,23 @@
+1. Keycloak admin console URL:
+{{- if .Values.route.enabled }}
+  OpenShift Route created. Retrieve the host with:
+    oc -n {{ .Release.Namespace }} get route/{{ include "keycloak-mas.keycloakFullname" . }}-keycloak -o jsonpath='{.status.ingress[0].host}'
+{{- else if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  http{{- if $.Values.ingress.tls }}s{{- end }}://{{ .host }}{{ (index .paths 0).path | default "/" }}
+{{- end }}
+{{- else if eq .Values.service.type "LoadBalancer" }}
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+  Follow with:
+    kubectl --namespace {{ .Release.Namespace }} get svc {{ include "keycloak-mas.keycloakFullname" . }} -w
+{{- else }}
+  ClusterIP detected. Port-forward to access locally:
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "keycloak-mas.keycloakFullname" . }} 8080:{{ .Values.service.port }}
+    Visit: http://127.0.0.1:8080
+{{- end }}
+
+2. Admin credentials are stored in Secret: {{ include "keycloak-mas.adminSecretName" . }}
+   Username: {{ .Values.keycloak.admin.username }}
+
+3. Verify readiness:
+   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/component=keycloak

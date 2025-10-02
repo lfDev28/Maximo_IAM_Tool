@@ -1,0 +1,312 @@
+{{- include "keycloak-mas.configurePostgresqlAuth" . -}}
+{{- $fullName := include "keycloak-mas.keycloakFullname" . -}}
+{{- $adminSecret := include "keycloak-mas.adminSecretName" . -}}
+{{- $dbSecret := include "keycloak-mas.databaseSecretName" . -}}
+{{- $dbPasswordKey := default "password" .Values.keycloak.database.passwordSecretKey -}}
+{{- $adminPasswordKey := default "admin-password" .Values.keycloak.admin.passwordSecretKey -}}
+{{- $truststoreEnabled := and .Values.keycloak.truststore.enabled .Values.keycloak.truststore.secretName -}}
+{{- $truststoreSecret := tpl (default "" .Values.keycloak.truststore.secretName) . -}}
+{{- $truststorePasswordSecret := tpl (default $truststoreSecret .Values.keycloak.truststore.passwordSecretName) . -}}
+{{- $realmVolumeEnabled := or .Values.realm.import.enabled .Values.realm.import.configMapName -}}
+{{- $httpsEnabled := and .Values.keycloak.https.enabled .Values.keycloak.https.existingSecret -}}
+{{- $httpsSecret := "" -}}
+{{- if $httpsEnabled -}}
+  {{- $httpsSecret = tpl .Values.keycloak.https.existingSecret . -}}
+{{- end -}}
+{{- $ldapCaEnabled := .Values.keycloak.ldap.caSecretName -}}
+{{- $javaOpts := join " " .Values.keycloak.javaOpts -}}
+{{- $pullSecrets := list -}}
+{{- range $s := (default (list) .Values.global.imagePullSecrets) -}}
+  {{- if kindIs "string" $s -}}
+    {{- $pullSecrets = append $pullSecrets (dict "name" $s) -}}
+  {{- else -}}
+    {{- $pullSecrets = append $pullSecrets $s -}}
+  {{- end -}}
+{{- end -}}
+{{- range $s := (default (list) .Values.keycloak.imagePullSecrets) -}}
+  {{- if kindIs "string" $s -}}
+    {{- $pullSecrets = append $pullSecrets (dict "name" $s) -}}
+  {{- else -}}
+    {{- $pullSecrets = append $pullSecrets $s -}}
+  {{- end -}}
+{{- end -}}
+{{- $importEnabled := .Values.keycloak.startup.import.enabled -}}
+{{- $importStrategy := default "auto" .Values.keycloak.startup.import.strategy | lower -}}
+{{- $importBehavior := upper (default "IGNORE_EXISTING" .Values.keycloak.startup.import.behavior) -}}
+{{- $importFailOnError := default true .Values.keycloak.startup.import.failOnError -}}
+{{- $majorVersion := (include "keycloak-mas.keycloakMajorVersion" . | int) -}}
+{{- $useModernImport := true -}}
+{{- if eq $importStrategy "legacy" -}}
+  {{- $useModernImport = false -}}
+{{- else if eq $importStrategy "auto" -}}
+  {{- if lt $majorVersion 17 -}}
+    {{- $useModernImport = false -}}
+  {{- end -}}
+{{- else if eq $importStrategy "modern" -}}
+  {{- $useModernImport = true -}}
+{{- end -}}
+{{- $startupArgs := list "start" -}}
+{{- if .Values.keycloak.startup.optimized -}}
+  {{- $startupArgs = append $startupArgs "--optimized" -}}
+{{- end -}}
+{{- if and $importEnabled $useModernImport -}}
+  {{- $startupArgs = append $startupArgs "--import-realm" -}}
+  {{- if ne $importBehavior "IGNORE_EXISTING" -}}
+    {{- $startupArgs = append $startupArgs (printf "--import-realm-strategy=%s" $importBehavior) -}}
+  {{- end -}}
+  {{- if not $importFailOnError -}}
+    {{- $startupArgs = append $startupArgs "--ignore-import-errors" -}}
+  {{- end -}}
+{{- else if and $importEnabled (not $useModernImport) -}}
+  {{- $startupArgs = append $startupArgs "-Dkeycloak.migration.action=import" -}}
+  {{- $startupArgs = append $startupArgs "-Dkeycloak.migration.provider=dir" -}}
+  {{- $startupArgs = append $startupArgs (printf "-Dkeycloak.migration.dir=%s" (.Values.realm.import.mountPath | default "/opt/keycloak/data/import")) -}}
+  {{- $startupArgs = append $startupArgs (printf "-Dkeycloak.migration.strategy=%s" $importBehavior) -}}
+  {{- $startupArgs = append $startupArgs (printf "-Dkeycloak.migration.failOnError=%t" $importFailOnError) -}}
+{{- end -}}
+{{- range $extra := .Values.keycloak.extraArgs -}}
+  {{- $startupArgs = append $startupArgs $extra -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "keycloak-mas.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.keycloak.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "keycloak-mas.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "keycloak-mas.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: keycloak
+        {{- with .Values.keycloak.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- $podAnnotations := dict -}}
+      {{- if .Values.keycloak.podAnnotations -}}
+        {{- $podAnnotations = merge $podAnnotations .Values.keycloak.podAnnotations -}}
+      {{- end -}}
+      {{- if and .Values.realm.import.checksum .Values.realm.import.enabled -}}
+        {{- $podAnnotations = merge $podAnnotations (dict "keycloak.mas/realm-checksum" (printf "%v" .Values.realm.import.checksum)) -}}
+      {{- end -}}
+      {{- if gt (len $podAnnotations) 0 }}
+      annotations:
+        {{- range $k, $v := $podAnnotations }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "keycloak-mas.serviceAccountName" . }}
+      {{- if $pullSecrets }}
+      imagePullSecrets:
+        {{- range $pullSecrets }}
+        - name: {{ index . "name" }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.keycloak.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: keycloak
+          image: {{ include "keycloak-mas.keycloakImage" . }}
+          imagePullPolicy: {{ .Values.keycloak.image.pullPolicy }}
+          args:
+            {{- range $startupArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.keycloak.http.port }}
+              protocol: TCP
+            {{- if .Values.keycloak.https.enabled }}
+            - name: https
+              containerPort: {{ .Values.keycloak.https.port }}
+              protocol: TCP
+            {{- end }}
+          env:
+            - name: KEYCLOAK_ADMIN
+              value: {{ .Values.keycloak.admin.username | quote }}
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $adminSecret }}
+                  key: {{ $adminPasswordKey }}
+            - name: KC_DB
+              value: {{ .Values.keycloak.database.vendor | default "postgres" | quote }}
+            - name: KC_DB_URL_HOST
+              value: {{ include "keycloak-mas.databaseHost" . | quote }}
+            - name: KC_DB_URL_PORT
+              value: {{ printf "%d" (int .Values.keycloak.database.port) | quote }}
+            - name: KC_DB_URL_DATABASE
+              value: {{ .Values.keycloak.database.name | quote }}
+            - name: KC_DB_USERNAME
+              value: {{ .Values.keycloak.database.username | quote }}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $dbSecret }}
+                  key: {{ $dbPasswordKey }}
+            - name: KC_PROXY
+              value: {{ .Values.keycloak.proxy.mode | quote }}
+            - name: KC_PROXY_HEADERS
+              value: {{ .Values.keycloak.proxy.headers | quote }}
+            - name: KC_HTTP_ENABLED
+              value: {{ ternary "true" "false" .Values.keycloak.http.enabled | quote }}
+            - name: KC_HTTP_PORT
+              value: {{ printf "%d" (int .Values.keycloak.http.port) | quote }}
+            {{- if .Values.keycloak.https.enabled }}
+            - name: KC_HTTPS_PORT
+              value: {{ printf "%d" (int .Values.keycloak.https.port) | quote }}
+            {{- end }}
+            {{- if .Values.keycloak.hostname.hostname }}
+            - name: KC_HOSTNAME
+              value: {{ .Values.keycloak.hostname.hostname | quote }}
+            {{- end }}
+            {{- if .Values.keycloak.hostname.admin }}
+            - name: KC_HOSTNAME_ADMIN
+              value: {{ .Values.keycloak.hostname.admin | quote }}
+            {{- end }}
+            - name: KC_HOSTNAME_STRICT
+              value: {{ ternary "true" "false" .Values.keycloak.hostname.strict | quote }}
+            - name: KC_HOSTNAME_STRICT_BACKCHANNEL
+              value: {{ ternary "true" "false" .Values.keycloak.hostname.strictBackchannel | quote }}
+            - name: KC_METRICS_ENABLED
+              value: {{ ternary "true" "false" .Values.keycloak.metrics.enabled | quote }}
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            {{- if $truststoreEnabled }}
+            - name: KC_SPI_TRUSTSTORE_FILE_FILE
+              value: {{ printf "%s/%s" (trimSuffix "/" .Values.keycloak.truststore.mountPath) (.Values.keycloak.truststore.fileKey | default "truststore.jks") | quote }}
+            - name: KC_SPI_TRUSTSTORE_FILE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $truststorePasswordSecret }}
+                  key: {{ .Values.keycloak.truststore.passwordFromSecretKey | default "truststore-password" }}
+            - name: KC_SPI_TRUSTSTORE_FILE_HOSTNAME_VERIFICATION_POLICY
+              value: {{ .Values.keycloak.truststore.hostnameVerificationPolicy | default "ANY" | quote }}
+            {{- end }}
+            {{- if $ldapCaEnabled }}
+            - name: LDAP_CA_BUNDLE
+              value: {{ printf "%s/ca.crt" (trimSuffix "/" .Values.keycloak.ldap.caMountPath) | quote }}
+            {{- end }}
+            {{- if $importEnabled }}
+            - name: KC_IMPORT
+              value: {{ printf "%s" (.Values.realm.import.mountPath | default "/opt/keycloak/data/import") | quote }}
+            {{- end }}
+            {{- if $javaOpts }}
+            - name: JAVA_OPTS_APPEND
+              value: {{ $javaOpts | quote }}
+            {{- end }}
+            {{- with .Values.keycloak.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.keycloak.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 60
+            timeoutSeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          {{- with .Values.keycloak.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.keycloak.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- $hasMounts := or $truststoreEnabled $realmVolumeEnabled $httpsEnabled $ldapCaEnabled (gt (len .Values.keycloak.extraVolumeMounts) 0) -}}
+          {{- if $hasMounts }}
+          volumeMounts:
+            {{- if $truststoreEnabled }}
+            - name: keycloak-truststore
+              mountPath: {{ .Values.keycloak.truststore.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- if $realmVolumeEnabled }}
+            - name: realm-import
+              mountPath: {{ .Values.realm.import.mountPath | default "/opt/keycloak/data/import" }}
+              readOnly: true
+            {{- end }}
+            {{- if $httpsEnabled }}
+            - name: keycloak-https
+              mountPath: /opt/keycloak/tls
+              readOnly: true
+            {{- end }}
+            {{- if $ldapCaEnabled }}
+            - name: ldap-ca
+              mountPath: {{ .Values.keycloak.ldap.caMountPath }}
+              readOnly: true
+            {{- end }}
+            {{- with .Values.keycloak.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+      {{- with .Values.keycloak.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.keycloak.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.keycloak.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $hasVolumes := or $truststoreEnabled $realmVolumeEnabled $httpsEnabled $ldapCaEnabled (gt (len .Values.keycloak.extraVolumes) 0) -}}
+      {{- if $hasVolumes }}
+      volumes:
+        {{- if $truststoreEnabled }}
+        - name: keycloak-truststore
+          secret:
+            secretName: {{ $truststoreSecret }}
+            {{- if .Values.keycloak.truststore.fileKey }}
+            items:
+              - key: {{ .Values.keycloak.truststore.fileKey }}
+                path: {{ .Values.keycloak.truststore.fileKey }}
+            {{- end }}
+        {{- end }}
+        {{- if $realmVolumeEnabled }}
+        - name: realm-import
+          configMap:
+            name: {{ include "keycloak-mas.realmConfigMapName" . }}
+        {{- end }}
+        {{- if $httpsEnabled }}
+        - name: keycloak-https
+          secret:
+            secretName: {{ $httpsSecret }}
+        {{- end }}
+        {{- if $ldapCaEnabled }}
+        - name: ldap-ca
+          secret:
+            secretName: {{ tpl .Values.keycloak.ldap.caSecretName . }}
+        {{- end }}
+        {{- with .Values.keycloak.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}

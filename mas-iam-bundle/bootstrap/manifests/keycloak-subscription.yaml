@@ -1,0 +1,20 @@
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: mas-iam-operators
+  namespace: ${TEMPLATE_NAMESPACE}
+spec:
+  targetNamespaces:
+    - ${TEMPLATE_NAMESPACE}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: keycloak-operator
+  namespace: ${TEMPLATE_NAMESPACE}
+spec:
+  channel: ${TEMPLATE_CHANNEL}
+  installPlanApproval: Automatic
+  name: keycloak-operator
+  source: ${TEMPLATE_SOURCE}
+  sourceNamespace: ${TEMPLATE_SOURCE_NS}

@@ -1,0 +1,20 @@
+{{- if .Values.ldap.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keycloak-mas.fullname" . }}-ldap
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/name: openldap
+spec:
+  selector:
+    app.kubernetes.io/name: openldap
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: ldap
+      port: 389
+      targetPort: ldap
+    - name: ldaps
+      port: 636
+      targetPort: ldaps
+{{- end }}

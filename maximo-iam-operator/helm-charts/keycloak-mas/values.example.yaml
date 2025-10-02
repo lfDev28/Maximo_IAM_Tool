@@ -1,0 +1,102 @@
+# Example values file for RHBK deployment on OpenShift. Adjust the TODOs per environment.
+
+# Namespace-scoped image pull secret if your entitlement registry requires it.
+global:
+  imagePullSecrets:
+    - rh-registry-creds
+
+keycloak:
+  replicaCount: 1
+
+  image:
+    registry: registry.redhat.io
+    repository: rhbk/keycloak-rhel9
+    tag: "26.0"
+
+  admin:
+    username: admin
+    # Reference an existing secret with the admin password. Set createSecret=false when using this.
+    existingSecret: keycloak-admin-credentials
+    passwordSecretKey: admin-password
+    createSecret: false
+
+  serviceAccount:
+    create: true
+    name: ""
+
+  hostname:
+    hostname: keycloak.apps.example.openshift.com
+    admin: admin-keycloak.apps.example.openshift.com
+    strict: true
+    strictBackchannel: false
+
+  proxy:
+    mode: edge
+    headers: xforwarded
+
+  http:
+    enabled: true
+    port: 8080
+  https:
+    enabled: false
+    port: 8443
+    existingSecret: keycloak-tls
+
+  startup:
+    optimized: true
+    import:
+      enabled: true
+      strategy: auto
+      behavior: IGNORE_EXISTING
+      failOnError: true
+
+  database:
+    host: keycloak-postgres.example.svc
+    port: 5432
+    name: keycloak
+    username: keycloak
+    existingSecret: keycloak-db-auth
+    passwordSecretKey: password
+
+  truststore:
+    enabled: true
+    secretName: keycloak-truststore
+    fileKey: truststore.jks
+    mountPath: /opt/keycloak/truststore
+    passwordSecretName: keycloak-truststore
+    passwordFromSecretKey: truststore-password
+    hostnameVerificationPolicy: ANY
+
+  ldap:
+    caSecretName: ldap-ca
+    caMountPath: /opt/keycloak/ldap-ca
+
+service:
+  type: ClusterIP
+  port: 8080
+
+route:
+  enabled: true
+  host: keycloak.apps.example.openshift.com
+  tls:
+    termination: edge
+
+realm:
+  import:
+    enabled: true
+    filename: realm-export.json
+    mountPath: /opt/keycloak/data/import
+  postImportJob:
+    enabled: true
+    ldapSecretName: ldap-bind
+    ldapSecretKey: bindPassword
+
+ldap:
+  enabled: false
+  # When deploying the optional OpenLDAP for local testing, define credentials and LDIF seed here.
+
+postgresql:
+  enabled: false
+
+postgresqlAuth:
+  create: false

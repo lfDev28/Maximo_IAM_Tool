@@ -1,0 +1,133 @@
+{{- if .Values.realm.postImportJob.enabled }}
+{{- if and (not .Values.realm.import.enabled) (not .Values.realm.import.configMapName) -}}
+  {{- fail "realm.postImportJob.enabled requires either realm.import.enabled or realm.import.configMapName" -}}
+{{- end -}}
+{{- $realmConfigName := include "keycloak-mas.realmConfigMapName" . -}}
+{{- $ldapSecretName := "" -}}
+{{- if .Values.realm.postImportJob.ldapSecretName -}}
+  {{- $ldapSecretName = tpl .Values.realm.postImportJob.ldapSecretName . -}}
+{{- else if .Values.ldap.admin.existingSecret -}}
+  {{- $ldapSecretName = tpl .Values.ldap.admin.existingSecret . -}}
+{{- else if .Values.ldap.enabled -}}
+  {{- $ldapSecretName = printf "%s-ldap-admin" (include "keycloak-mas.fullname" .) -}}
+{{- end -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "keycloak-mas.keycloakFullname" . }}-realm-postimport
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/name: keycloak-realm-postimport
+  {{- with .Values.realm.postImportJob.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  backoffLimit: {{ .Values.realm.postImportJob.backoffLimit | default 3 }}
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "keycloak-mas.serviceAccountName" . }}
+      containers:
+        - name: realm-ops
+          image: {{ .Values.realm.postImportJob.image | default (include "keycloak-mas.keycloakImage" .) }}
+          imagePullPolicy: {{ .Values.realm.postImportJob.imagePullPolicy | default .Values.keycloak.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+
+              KC_SERVICE="{{ include "keycloak-mas.keycloakFullname" . }}"
+              KC_URL="http://${KC_SERVICE}:{{ .Values.service.port }}"
+
+              ADMIN_USER="{{ .Values.keycloak.admin.username }}"
+              ADMIN_PASS="$(cat /secrets/admin/{{ .Values.keycloak.admin.passwordSecretKey | default "admin-password" }})"
+
+              echo "Waiting for Keycloak admin endpoint to accept credentials ..."
+              for i in $(seq 1 120); do
+                if /opt/keycloak/bin/kcadm.sh config credentials \
+                  --server "${KC_URL}" \
+                  --realm master \
+                  --user "${ADMIN_USER}" \
+                  --password "${ADMIN_PASS}" >/dev/null 2>&1; then
+                  echo "kcadm authentication succeeded."
+                  break
+                fi
+                sleep 5
+              done
+
+              # Ensure credentials are cached for subsequent commands.
+              /opt/keycloak/bin/kcadm.sh config credentials \
+                --server "${KC_URL}" \
+                --realm master \
+                --user "${ADMIN_USER}" \
+                --password "${ADMIN_PASS}" >/dev/null
+
+              REALM_FILE="/realm/{{ .Values.realm.import.filename }}"
+              REALM_NAME=$(sed -n 's/.*"realm"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${REALM_FILE}" | head -n1)
+
+              if [[ -z "${REALM_NAME}" ]]; then
+                echo "ERROR: Unable to introspect realm name from ${REALM_FILE}" >&2
+                exit 1
+              fi
+
+              if [[ "${REALM_IMPORT_ENABLED:-false}" == "true" ]]; then
+                echo "Realm import handled during Keycloak startup; skipping kcadm import."
+              else
+                echo "Importing realm ${REALM_NAME} via kcadm ..."
+                if /opt/keycloak/bin/kcadm.sh create realms -f "${REALM_FILE}"; then
+                  echo "Realm created."
+                else
+                  echo "Realm create failed (likely exists)."
+                  {{- if eq (upper (default "IGNORE_EXISTING" .Values.keycloak.startup.import.behavior)) "OVERWRITE_EXISTING" }}
+                  echo "Strategy OVERWRITE_EXISTING configured → replacing realm."
+                  /opt/keycloak/bin/kcadm.sh delete "realms/${REALM_NAME}" || true
+                  /opt/keycloak/bin/kcadm.sh create realms -f "${REALM_FILE}"
+                  echo "Realm replaced."
+                  {{- else }}
+                  echo "Keeping existing realm as configured."
+                  {{- end }}
+                fi
+              fi
+
+              if [[ -n "${LDAP_BIND_PASSWORD:-}" ]]; then
+                echo "Updating LDAP bind credential for realm ${REALM_NAME} ..."
+                LDAP_COMPONENT=$(/opt/keycloak/bin/kcadm.sh get components -r "${REALM_NAME}" \
+                  -q providerId=ldap -q type=org.keycloak.storage.UserStorageProvider |
+                  sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+                if [[ -n "${LDAP_COMPONENT}" ]]; then
+                  /opt/keycloak/bin/kcadm.sh update "components/${LDAP_COMPONENT}" -r "${REALM_NAME}" \
+                    -s 'config.bindCredential=["'"${LDAP_BIND_PASSWORD}"'"]'
+                  echo "LDAP bind credential updated."
+                else
+                  echo "WARNING: LDAP federation component not found; skipping bind credential update." >&2
+                fi
+              else
+                echo "LDAP bind password not provided; skipping bind credential patch."
+              fi
+          env:
+            - name: REALM_IMPORT_ENABLED
+              value: {{ ternary "true" "false" .Values.keycloak.startup.import.enabled | quote }}
+            {{- if $ldapSecretName }}
+            - name: LDAP_BIND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ldapSecretName }}
+                  key: {{ .Values.realm.postImportJob.ldapSecretKey | default "LDAP_ADMIN_PASSWORD" }}
+            {{- end }}
+          volumeMounts:
+            - name: realm
+              mountPath: /realm
+              readOnly: true
+            - name: kc-admin
+              mountPath: /secrets/admin
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: {{ $realmConfigName }}
+        - name: kc-admin
+          secret:
+            secretName: {{ include "keycloak-mas.adminSecretName" . }}
+{{- end }}

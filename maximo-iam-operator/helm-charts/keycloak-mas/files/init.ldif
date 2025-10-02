@@ -1,0 +1,43 @@
+## Rendered by Helm via tpl() so we can align with .Values.ldap.baseDN
+
+# Base structure
+dn: ou=users,{{ .Values.ldap.baseDN }}
+objectClass: organizationalUnit
+ou: users
+
+dn: ou=groups,{{ .Values.ldap.baseDN }}
+objectClass: organizationalUnit
+ou: groups
+
+# User 1: John Doe
+dn: uid=jdoe,ou=users,{{ .Values.ldap.baseDN }}
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+cn: John Doe
+sn: Doe
+givenName: John
+uid: jdoe
+mail: jdoe@example.org
+userPassword: password123
+
+# User 2: Alice Smith
+dn: uid=asmith,ou=users,{{ .Values.ldap.baseDN }}
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+cn: Alice Smith
+sn: Smith
+givenName: Alice
+uid: asmith
+mail: asmith@example.org
+userPassword: password123
+
+# Group: devs (with both users as members)
+dn: cn=devs,ou=groups,{{ .Values.ldap.baseDN }}
+objectClass: groupOfNames
+cn: devs
+member: uid=jdoe,ou=users,{{ .Values.ldap.baseDN }}
+member: uid=asmith,ou=users,{{ .Values.ldap.baseDN }}

@@ -1,0 +1,84 @@
+# config/samples/iam_v1alpha1_maximoiam.yaml
+apiVersion: iam.lfdev28.io/v1alpha1
+kind: MaximoIAM
+metadata:
+  name: mas-iam
+  namespace: maximo-iam
+spec:
+  postgresqlAuth:
+    create: true
+    secretName: "__RELEASE__-pg-auth"
+    password: "__PG_PASSWORD__"     # set via PG_PASSWORD env; leave empty to auto-generate
+    postgresPassword: ""            # defaults to password when empty
+
+  # Global values visible to subcharts
+  global:
+    postgresql:
+      auth:
+        existingSecret: "__RELEASE__-pg-auth"
+        password: "__PG_PASSWORD__"
+        postgresPassword: "__PG_PASSWORD__"
+        username: bn_keycloak
+
+  kc:
+    nameOverride: "keycloak"
+    production: true
+    proxyHeaders: "xforwarded"
+    auth:
+      existingSecret: mas-iam-kc-admin
+
+    # Embedded PostgreSQL with rook-ceph
+    postgresql:
+      enabled: true
+      auth:
+        existingSecret: "__RELEASE__-pg-auth"
+        password: "__PG_PASSWORD__"
+        postgresPassword: "__PG_PASSWORD__"
+        username: bn_keycloak
+        database: bitnami_keycloak
+      volumePermissions:
+        enabled: true
+      podSecurityContext:
+        enabled: true
+        fsGroup: 1001
+      containerSecurityContext:
+        enabled: true
+        runAsUser: 1001
+      primary:
+        persistence:
+          enabled: true
+          storageClass: rook-ceph-block    # <-- set to $SC you exported
+          size: 8Gi
+
+    ingress:
+      enabled: false
+
+  ldap:
+    enabled: true
+    baseDN: "dc=mas,dc=local"
+    organisation: "Maximo"
+    domain: "mas.local"
+    admin:
+      # Provide your own secret with key: LDAP_ADMIN_PASSWORD
+      existingSecret: mas-iam-ldap-admin
+    persistence:
+      enabled: true
+      storageClass: rook-ceph-block       # <-- set to $SC
+      size: 2Gi
+    securityContext:
+      fsGroup: 1001
+      fsGroupChangePolicy: OnRootMismatch
+    seed:
+      enabled: true
+
+  realmImport:
+    enabled: true
+    filename: "maximo-realm.json"
+    strategy: OVERWRITE_EXISTING
+
+  route:
+    enabled: true
+    host: ""                              # let OCP auto-generate the host
+    tls: { termination: edge }
+
+  scim: { enabled: false }

@@ -1,0 +1,10 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: mas-iam-operator-catalog
+  namespace: openshift-marketplace
+spec:
+  sourceType: grpc
+  image: quay.io/your-org/mas-iam-operator-index:0.1.0
+  displayName: MAS IAM Operators
+  publisher: MAS IAM

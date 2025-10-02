@@ -1,0 +1,121 @@
+{{- if .Values.ldap.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "keycloak-mas.fullname" . }}-ldap
+  labels:
+    app.kubernetes.io/name: openldap
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openldap
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openldap
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- with .Values.ldap.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- if .Values.ldap.seed.enabled }}
+      initContainers:
+        - name: stage-ldif
+          image: {{ .Values.ldap.seed.initImage | default "registry.access.redhat.com/ubi9/ubi-minimal" | quote }}
+          command: ["/bin/sh","-c"]
+          args:
+            - >
+              mkdir -p /ldif-custom &&
+              cp -a /config-ldif/* /ldif-custom/ 2>/dev/null || true &&
+              ls -la /ldif-custom
+          volumeMounts:
+            - name: ldap-custom
+              mountPath: /ldif-custom
+            - name: ldap-seed
+              mountPath: /config-ldif
+      {{- end }}
+
+      containers:
+        - name: openldap
+          image: {{ .Values.ldap.image | quote }}
+          ports:
+            - name: ldap
+              containerPort: 389
+            - name: ldaps
+              containerPort: 636
+          env:
+            # Base DN and identity
+            - name: LDAP_ORGANISATION
+              value: {{ .Values.ldap.organisation | default "Maximo" | quote }}
+            - name: LDAP_DOMAIN
+              value: {{ .Values.ldap.domain | default "mas.local" | quote }}
+            - name: LDAP_BASE_DN
+              value: {{ .Values.ldap.baseDN | quote }}
+            # Avoid removing config directory after setup (prevents rm of mounted path)
+            - name: LDAP_REMOVE_CONFIG_AFTER_SETUP
+              value: "false"
+
+            # Admin password
+            - name: LDAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if .Values.ldap.admin.existingSecret }}{{ .Values.ldap.admin.existingSecret }}{{ else }}{{ include "keycloak-mas.fullname" . }}-ldap-admin{{ end }}
+                  key: LDAP_ADMIN_PASSWORD
+
+            # Optional TLS (ldaps)
+            {{- if .Values.ldap.tls.enabled }}
+            - name: LDAP_TLS
+              value: "true"
+            - name: LDAP_TLS_ENFORCE
+              value: "false"   # set true to force ldaps-only
+            - name: LDAP_TLS_CRT_FILENAME
+              value: "server.crt"
+            - name: LDAP_TLS_KEY_FILENAME
+              value: "server.key"
+            - name: LDAP_TLS_CA_CRT_FILENAME
+              value: "ca.crt"
+            {{- end }}
+          volumeMounts:
+            - name: ldap-data
+              mountPath: /var/lib/ldap
+            - name: ldap-config
+              mountPath: /etc/ldap/slapd.d
+            {{- if .Values.ldap.seed.enabled }}
+            # Mount the WRITABLE directory populated by the initContainer
+            - name: ldap-custom
+              mountPath: /container/service/slapd/assets/config/bootstrap/ldif/custom
+            {{- end }}
+            {{- if and .Values.ldap.tls.enabled .Values.ldap.tls.existingSecret }}
+            - name: ldap-tls
+              mountPath: /container/service/slapd/assets/certs
+              readOnly: true
+            {{- end }}
+
+      volumes:
+        - name: ldap-data
+          {{- if .Values.ldap.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "keycloak-mas.fullname" . }}-ldap
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: ldap-config
+          emptyDir: {}
+        {{- if .Values.ldap.seed.enabled }}
+        - name: ldap-custom
+          emptyDir: {}
+        - name: ldap-seed
+          configMap:
+            name: {{ if .Values.ldap.seed.configMapName }}{{ .Values.ldap.seed.configMapName }}{{ else }}{{ include "keycloak-mas.fullname" . }}-ldap-seed{{ end }}
+        {{- end }}
+        {{- if and .Values.ldap.tls.enabled .Values.ldap.tls.existingSecret }}
+        - name: ldap-tls
+          secret:
+            secretName: {{ .Values.ldap.tls.existingSecret | quote }}
+        {{- end }}
+{{- end }}

@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mas-iam-postgres
+  namespace: mas-iam
+  labels:
+    app: mas-iam-postgres
+spec:
+  selector:
+    app: mas-iam-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mas-iam-postgres
+  namespace: mas-iam
+spec:
+  serviceName: mas-iam-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mas-iam-postgres
+  template:
+    metadata:
+      labels:
+        app: mas-iam-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:15
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: keycloak
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mas-iam-db
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mas-iam-db
+                  key: password
+          ports:
+            - containerPort: 5432
+              name: postgres
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi

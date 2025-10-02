@@ -1,0 +1,21 @@
+{{- if .Values.route.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "keycloak-mas.fullname" . }}-keycloak
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/name: keycloak
+spec:
+  to:
+    kind: Service
+    name: {{ include "keycloak-mas.keycloakFullname" . }}
+    weight: 100
+  port:
+    targetPort: http
+  {{- if .Values.route.host }}
+  host: {{ .Values.route.host | quote }}
+  {{- end }}
+  tls:
+    termination: {{ .Values.route.tls.termination | quote }}
+{{- end }}

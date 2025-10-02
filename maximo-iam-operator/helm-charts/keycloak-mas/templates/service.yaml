@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keycloak-mas.keycloakFullname" . }}
+  labels:
+    {{- include "keycloak-mas.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+    {{- with .Values.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ include "keycloak-mas.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: keycloak
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      protocol: TCP
+      targetPort: http
+  {{- if .Values.keycloak.https.enabled }}
+    - name: https
+      port: {{ .Values.keycloak.https.port }}
+      protocol: TCP
+      targetPort: https
+  {{- end }}

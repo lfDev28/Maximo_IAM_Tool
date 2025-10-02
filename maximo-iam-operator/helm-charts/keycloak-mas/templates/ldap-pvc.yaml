@@ -1,0 +1,17 @@
+{{- if and .Values.ldap.enabled .Values.ldap.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "keycloak-mas.fullname" . }}-ldap
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/name: openldap
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.ldap.persistence.size | quote }}
+  {{- if .Values.ldap.persistence.storageClass }}
+  storageClassName: {{ .Values.ldap.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}
